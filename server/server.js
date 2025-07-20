@@ -62,9 +62,19 @@ const goodreadsWorkSchema = z.object({
 const goodreadsResponseSchema = z.object({
   GoodreadsResponse: z.object({
     search: z.object({
-      results: z.object({
-        work: z.array(goodreadsWorkSchema).optional(),
-      }),
+      'results-start': z.string(),
+      'results-end': z.string(),
+      'total-results': z.string(),
+      'query-time-seconds': z.string(),
+      results: z.union([
+        z.string(),
+        z.object({
+          work: z.union([
+            z.array(goodreadsWorkSchema),
+            goodreadsWorkSchema
+          ]).optional(),
+        }),
+      ]),
     }),
   }),
 });
@@ -78,17 +88,24 @@ app.get('/api/search', async (req, res) => {
   if (!q) {
     return res.status(400).json({ error: 'Search query is required' });
   }
-
+  let result;
   try {
     const goodreadsUrl = `https://www.goodreads.com/search/index.xml?key=${GOODREADS_API_KEY}&q=${q}&page=${page}`;
     const response = await axios.get(goodreadsUrl);
     const xml = response.data;
 
     const parser = new xml2js.Parser({ explicitArray: false });
-    const result = await parser.parseStringPromise(xml);
+    result = await parser.parseStringPromise(xml);
 
     const validatedResponse = goodreadsResponseSchema.parse(result);
-    const searchResults = validatedResponse.GoodreadsResponse.search.results.work || [];
+    const search = validatedResponse.GoodreadsResponse.search;
+    
+    let workData = [];
+    if (typeof search.results !== 'string' && search.results.work) {
+      workData = search.results.work;
+    }
+    
+    const searchResults = Array.isArray(workData) ? workData : [workData];
 
     const books = searchResults.map(work => ({
       id: work.best_book.id._,
@@ -102,10 +119,25 @@ app.get('/api/search', async (req, res) => {
         : work.average_rating._,
     }));
 
-    res.json({ books });
+    const resultsStart = parseInt(search['results-start'], 10);
+    const resultsEnd = parseInt(search['results-end'], 10);
+    const totalResults = parseInt(search['total-results'], 10);
+    const itemsPerPage = totalResults > 0 ? (resultsEnd - resultsStart + 1) : 0;
+    const totalPages = itemsPerPage > 0 ? Math.ceil(totalResults / itemsPerPage) : 0;
+
+    res.json({
+      books,
+      pagination: {
+        page: parseInt(page, 10),
+        resultsStart,
+        resultsEnd,
+        totalResults,
+        totalPages,
+      }
+    });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: 'Invalid data from Goodreads API', details: error.errors });
+      return res.status(400).json({ error: 'Invalid data from Goodreads API', details: error.errors, result });
     }
     console.error(error);
     res.status(500).json({ error: 'Something went wrong' });
