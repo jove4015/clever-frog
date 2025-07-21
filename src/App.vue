@@ -1,12 +1,37 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
+import { z } from 'zod';
+
+const bookSchema = z.object({
+  id: z.union([z.string(), z.number()]),
+  imageUrl: z.string(),
+  title: z.string(),
+  author: z.string(),
+  publicationYear: z.union([z.number(), z.string()]).optional(),
+  averageRating: z.union([z.number(), z.string()]),
+});
+
+const paginationSchema = z.object({
+  resultsEnd: z.number(),
+  totalResults: z.number(),
+  page: z.number(),
+  totalPages: z.number(),
+});
+
+const apiResponseSchema = z.object({
+  books: z.array(bookSchema),
+  pagination: paginationSchema.nullable(),
+});
+
+type Book = z.infer<typeof bookSchema>;
+type Pagination = z.infer<typeof paginationSchema>;
 
 const searchQuery = ref('');
-const books = ref([]);
+const books = ref<Book[]>([]);
 const error = ref('');
 const hasResults = ref(false);
 const currentPage = ref(1);
-const pagination = ref(null);
+const pagination = ref<Pagination | null>(null);
 const isLoading = ref(false);
 
 const searchBooks = async (page = 1) => {
@@ -17,15 +42,21 @@ const searchBooks = async (page = 1) => {
   if (!searchQuery.value) {
     hasResults.value = false;
     isLoading.value = false;
+      books.value = [];
+      pagination.value = null;
     return;
   }
 
   try {
     const response = await fetch(`/api/search?q=${searchQuery.value}&page=${page}`);
     if (!response.ok) {
+      books.value = [];
+      pagination.value = null;
+      hasResults.value = false;
       throw new Error('Something went wrong');
     }
-    const data = await response.json();
+    const rawData = await response.json();
+    const data = apiResponseSchema.parse(rawData);
     
     if (data.books && data.books.length > 0) {
       books.value = data.books;
@@ -37,7 +68,7 @@ const searchBooks = async (page = 1) => {
       hasResults.value = false;
       error.value = "No books were found, please try a different search!";
     }
-  } catch (err) {
+  } catch (err: any) {
     hasResults.value = false;
     error.value = err.message;
   } finally {
@@ -62,27 +93,29 @@ const onFirstSearch = () => {
 
 <template>
   <div id="app" :class="{ 'initial-state': !hasResults, 'results-state': hasResults }">
-    <div class="top-bar">
-      <div class="search-container">
-        <form @submit.prevent="onFirstSearch">
-          <div class="input-wrapper">
-            <input type="text" v-model="searchQuery" placeholder="What would you like to read today?" />
-            <button type="submit" class="search-button" :disabled="isLoading">
-              <svg v-if="!isLoading" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><rect width="256" height="256" fill="none"/><circle cx="112" cy="112" r="80" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><line x1="168.57" y1="168.57" x2="224" y2="224" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/></svg>
-              <svg v-else class="spinner" viewBox="0 0 50 50"><circle class="path" cx="25" cy="25" r="20" fill="none" stroke-width="5"></circle></svg>
-            </button>
-          </div>
-        </form>
-      </div>
+    <div class="sticky-header">
+      <div class="top-bar">
+        <div class="search-container">
+          <form @submit.prevent="onFirstSearch">
+            <div class="input-wrapper">
+              <input type="text" v-model="searchQuery" placeholder="What would you like to read today?" />
+              <button type="submit" class="search-button" :disabled="isLoading">
+                <svg v-if="!isLoading" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><rect width="256" height="256" fill="none"/><circle cx="112" cy="112" r="80" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><line x1="168.57" y1="168.57" x2="224" y2="224" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/></svg>
+                <svg v-else class="spinner" viewBox="0 0 50 50"><circle class="path" cx="25" cy="25" r="20" fill="none" stroke-width="5"></circle></svg>
+              </button>
+            </div>
+          </form>
+        </div>
 
-      <div v-if="hasResults && pagination" class="pagination">
-        <button v-if="hasPreviousPage" @click="searchBooks(currentPage - 1)" class="pagination-button" :disabled="isLoading">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><rect width="256" height="256" fill="none"/><polyline points="160 208 80 128 160 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/></svg>
-        </button>
-        <span class="page-info">Page {{ pagination.page }} of {{ pagination.totalPages }}</span>
-        <button v-if="hasNextPage" @click="searchBooks(currentPage + 1)" class="pagination-button" :disabled="isLoading">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><rect width="256" height="256" fill="none"/><polyline points="96 48 176 128 96 208" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/></svg>
-        </button>
+        <div v-if="hasResults && pagination" class="pagination">
+          <button v-if="hasPreviousPage" @click="searchBooks(currentPage - 1)" class="pagination-button" :disabled="isLoading">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><rect width="256" height="256" fill="none"/><polyline points="160 208 80 128 160 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/></svg>
+          </button>
+          <span class="page-info">Page {{ pagination.page }} of {{ pagination.totalPages }}</span>
+          <button v-if="hasNextPage" @click="searchBooks(currentPage + 1)" class="pagination-button" :disabled="isLoading">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><rect width="256" height="256" fill="none"/><polyline points="96 48 176 128 96 208" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/></svg>
+          </button>
+        </div>
       </div>
     </div>
 
@@ -117,21 +150,33 @@ const onFirstSearch = () => {
   align-items: center;
   height: 100vh;
   text-align: center;
+  flex-direction: column;
 }
 #app.initial-state .top-bar {
   width: 100%;
   display: flex;
   justify-content: center;
 }
-#app.results-state {
-  margin-top: 20px;
-}
+
 .top-bar {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  padding: 20px;
+}
+.sticky-header {
+  position: sticky;
+  top: 0;
+  background: #efefef;
   margin-bottom: 20px;
-  padding: 0 20px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+#app.initial-state .sticky-header {
+  background-color: #fff;
+  box-shadow: none;
+  position: static;
+  margin-bottom: 0;
+  top: auto;
 }
 .search-container {
   flex-grow: 1;
@@ -141,10 +186,12 @@ const onFirstSearch = () => {
 }
 .input-wrapper {
   position: relative;
-  width: 400px;
+  max-width: 100%;
 }
 #app.initial-state .input-wrapper {
   margin: 0 auto;
+  width: 400px;
+  max-width: 80%;
 }
 input {
   padding: 10px 40px 10px 10px;
@@ -209,6 +256,7 @@ input {
 .pagination {
   display: flex;
   align-items: center;
+  flex-shrink: 0;
 }
 
 .pagination-button {
@@ -232,6 +280,7 @@ input {
 .page-info {
   margin: 0 10px;
   font-size: 16px;
+  white-space: nowrap;
 }
 
 .error {
@@ -239,8 +288,6 @@ input {
   margin-bottom: 20px;
   text-align: center;
   width: 100%;
-  position: absolute;
-  top: 55%;
 }
 
 #app.results-state .error {

@@ -100,12 +100,10 @@ app.get('/api/search', async (req, res) => {
     const validatedResponse = goodreadsResponseSchema.parse(result);
     const search = validatedResponse.GoodreadsResponse.search;
     
-    let workData = [];
-    if (typeof search.results !== 'string' && search.results.work) {
-      workData = search.results.work;
-    }
+    let workData = typeof search.results !== 'string' && search.results.work ? search.results.work : undefined;
     
-    const searchResults = Array.isArray(workData) ? workData : [workData];
+  
+    const searchResults = workData ? Array.isArray(workData) ? workData : [workData] : [];
 
     const books = searchResults.map(work => ({
       id: work.best_book.id._,
